@@ -107,7 +107,9 @@ async def create_pdf_from_images(callback: CallbackQuery, state: FSMContext):
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
             pdf_path = os.path.join(temp_dir, "result.pdf")
-            create_pdf_from_images_list(images, pdf_path)
+            
+            # Используем альтернативный метод создания PDF
+            create_pdf_from_images_pil(images, pdf_path)
             
             await callback.message.answer_document(
                 FSInputFile(pdf_path, filename="images_to_pdf.pdf")
@@ -137,7 +139,7 @@ async def create_pdf_from_images(callback: CallbackQuery, state: FSMContext):
 
 
 def create_pdf_from_images_list(images_data, output_path):
-    """Создает PDF из списка изображений."""
+    """Создает PDF из списка изображений с помощью PyMuPDF."""
     pdf = fitz.open()
     
     for img_data in images_data:
@@ -155,6 +157,30 @@ def create_pdf_from_images_list(images_data, output_path):
     
     pdf.save(output_path)
     pdf.close()
+
+
+def create_pdf_from_images_pil(images_data, output_path):
+    """Создает PDF из списка изображений с помощью PIL."""
+    images = []
+    
+    for img_data in images_data:
+        img = Image.open(BytesIO(img_data))
+        
+        if img.mode == 'RGBA':
+            img = img.convert('RGB')
+        
+        images.append(img)
+    
+    if images:
+        # Первое изображение сохраняем как PDF
+        first_image = images[0]
+        first_image.save(
+            output_path, 
+            "PDF", 
+            resolution=100.0, 
+            save_all=True,
+            append_images=images[1:] if len(images) > 1 else []
+        )
 
 
 @router.callback_query(F.data == "menu:merge_pdf")
