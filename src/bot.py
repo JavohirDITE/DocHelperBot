@@ -1,6 +1,12 @@
 import asyncio
 import logging
 import os
+import sys
+from pathlib import Path
+
+# Добавляем путь к src в PYTHONPATH
+sys.path.insert(0, str(Path(__file__).parent))
+
 from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher

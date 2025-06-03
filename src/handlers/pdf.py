@@ -12,7 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import fitz
 from PIL import Image
 
-from .utils import delete_previous_messages
+from handlers.utils import delete_previous_messages
 
 router = Router()
 logger = logging.getLogger(__name__)

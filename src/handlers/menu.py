@@ -3,7 +3,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from .utils import delete_previous_messages
+from handlers.utils import delete_previous_messages
 
 router = Router()
 

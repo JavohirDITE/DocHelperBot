@@ -11,11 +11,15 @@ RUN apt-get update && apt-get install -y \
 # Создание рабочей директории
 WORKDIR /app
 
-# Копирование файлов
+# Копирование requirements.txt и установка зависимостей
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY src/ ./src/
+# Копирование всего проекта
+COPY . .
+
+# Установка переменной окружения для Python
+ENV PYTHONPATH=/app
 
 # Запуск бота
-CMD ["python", "-m", "src.bot"]
+CMD ["python", "src/bot.py"]

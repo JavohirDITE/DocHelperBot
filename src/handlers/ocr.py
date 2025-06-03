@@ -2,7 +2,6 @@ import os
 import tempfile
 import logging
 import asyncio
-from io import BytesIO
 
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
@@ -13,7 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import pytesseract
 from PIL import Image
 
-from .utils import delete_previous_messages
+from handlers.utils import delete_previous_messages
 
 router = Router()
 logger = logging.getLogger(__name__)

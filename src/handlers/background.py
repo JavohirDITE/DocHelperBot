@@ -13,7 +13,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from rembg import remove
 
-from .utils import delete_previous_messages
+from handlers.utils import delete_previous_messages
 
 router = Router()
 logger = logging.getLogger(__name__)
