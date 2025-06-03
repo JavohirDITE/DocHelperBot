@@ -25,7 +25,19 @@ class OCRStates(StatesGroup):
 async def start_ocr(callback: CallbackQuery, state: FSMContext):
     """Начало процесса распознавания текста."""
     await callback.answer()
+    
+    # Устанавливаем состояние ожидания изображения
     await state.set_state(OCRStates.waiting_for_image)
+    
+    await delete_previous_messages(callback.message)
+    
+    await callback.message.answer(
+        "🔍 <b>Распознавание текста (OCR)</b>\n\n"
+        "Отправьте мне изображение с текстом для распознавания.",
+        reply_markup=InlineKeyboardBuilder()
+        .button(text="⬅️ Назад", callback_data="back_to_menu")
+        .as_markup()
+    )
 
 
 @router.message(F.photo, OCRStates.waiting_for_image)

@@ -27,7 +27,19 @@ class BackgroundRemovalStates(StatesGroup):
 async def start_background_removal(callback: CallbackQuery, state: FSMContext):
     """Начало процесса удаления фона."""
     await callback.answer()
+    
+    # Устанавливаем состояние ожидания изображения
     await state.set_state(BackgroundRemovalStates.waiting_for_image)
+    
+    await delete_previous_messages(callback.message)
+    
+    await callback.message.answer(
+        "🎭 <b>Удаление фона</b>\n\n"
+        "Отправьте мне изображение, с которого нужно удалить фон.",
+        reply_markup=InlineKeyboardBuilder().button(
+            text="⬅️ Назад", callback_data="back_to_menu"
+        ).as_markup()
+    )
 
 
 @router.message(F.photo, BackgroundRemovalStates.waiting_for_image)
@@ -36,30 +48,41 @@ async def process_image_for_background_removal(message: Message, state: FSMConte
     """Обработка изображения для удаления фона."""
     processing_msg = await message.answer("🔄 Обрабатываю изображение...")
     
-    if message.photo:
-        file_id = message.photo[-1].file_id
-    else:
-        file_id = message.document.file_id
-    
-    file = await message.bot.get_file(file_id)
-    file_content = await message.bot.download_file(file.file_path)
-    
-    await state.update_data(original_image=file_content.read())
-    
-    await processing_msg.delete()
-    
-    await message.answer(
-        "🎨 Выберите фон для изображения:",
-        reply_markup=InlineKeyboardBuilder()
-        .button(text="🔵 Голубой фон", callback_data="bg:blue")
-        .button(text="⚪️ Белый фон", callback_data="bg:white")
-        .button(text="🔳 Прозрачный (PNG)", callback_data="bg:transparent")
-        .button(text="⬅️ Назад", callback_data="back_to_menu")
-        .adjust(2, 2)
-        .as_markup()
-    )
-    
-    await state.set_state(BackgroundRemovalStates.waiting_for_background_choice)
+    try:
+        if message.photo:
+            file_id = message.photo[-1].file_id
+        else:
+            file_id = message.document.file_id
+        
+        file = await message.bot.get_file(file_id)
+        file_content = await message.bot.download_file(file.file_path)
+        
+        await state.update_data(original_image=file_content.read())
+        
+        await processing_msg.delete()
+        
+        await message.answer(
+            "🎨 Выберите фон для изображения:",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="🔵 Голубой фон", callback_data="bg:blue")
+            .button(text="⚪️ Белый фон", callback_data="bg:white")
+            .button(text="🔳 Прозрачный (PNG)", callback_data="bg:transparent")
+            .button(text="⬅️ Назад", callback_data="back_to_menu")
+            .adjust(2, 2)
+            .as_markup()
+        )
+        
+        await state.set_state(BackgroundRemovalStates.waiting_for_background_choice)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке изображения: {e}")
+        await processing_msg.delete()
+        await message.answer(
+            f"❌ Ошибка при загрузке изображения: {str(e)}",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="⬅️ Назад", callback_data="back_to_menu")
+            .as_markup()
+        )
 
 
 @router.callback_query(F.data.startswith("bg:"), BackgroundRemovalStates.waiting_for_background_choice)

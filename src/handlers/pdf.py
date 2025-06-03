@@ -27,37 +27,62 @@ class PDFStates(StatesGroup):
 async def start_images_to_pdf(callback: CallbackQuery, state: FSMContext):
     """Начало процесса конвертации изображений в PDF."""
     await callback.answer()
+    
+    # Устанавливаем состояние ожидания изображений
     await state.set_state(PDFStates.waiting_for_images)
     await state.update_data(images=[])
-
-
-@router.message(F.photo, PDFStates.waiting_for_images)
-@router.message(F.document & F.document.mime_type.startswith("image/"), PDFStates.waiting_for_images)
-async def process_image_for_pdf(message: Message, state: FSMContext):
-    """Обработка изображения для конвертации в PDF."""
-    if message.photo:
-        file_id = message.photo[-1].file_id
-    else:
-        file_id = message.document.file_id
     
-    file = await message.bot.get_file(file_id)
-    file_content = await message.bot.download_file(file.file_path)
+    await delete_previous_messages(callback.message)
     
-    data = await state.get_data()
-    images = data.get("images", [])
-    images.append(file_content.read())
-    
-    await state.update_data(images=images)
-    
-    await message.answer(
-        f"✅ Изображение добавлено. Всего изображений: {len(images)}.\n"
-        "Отправьте еще изображения или нажмите «Создать PDF».",
+    await callback.message.answer(
+        "📸 <b>Изображения → PDF</b>\n\n"
+        "Отправьте мне одно или несколько изображений, которые нужно объединить в PDF.\n"
+        "После отправки всех изображений нажмите кнопку «Создать PDF».",
         reply_markup=InlineKeyboardBuilder()
         .button(text="📄 Создать PDF", callback_data="create_pdf")
         .button(text="⬅️ Назад", callback_data="back_to_menu")
         .adjust(1)
         .as_markup()
     )
+
+
+@router.message(F.photo, PDFStates.waiting_for_images)
+@router.message(F.document & F.document.mime_type.startswith("image/"), PDFStates.waiting_for_images)
+async def process_image_for_pdf(message: Message, state: FSMContext):
+    """Обработка изображения для конвертации в PDF."""
+    try:
+        if message.photo:
+            file_id = message.photo[-1].file_id
+        else:
+            file_id = message.document.file_id
+        
+        file = await message.bot.get_file(file_id)
+        file_content = await message.bot.download_file(file.file_path)
+        
+        data = await state.get_data()
+        images = data.get("images", [])
+        images.append(file_content.read())
+        
+        await state.update_data(images=images)
+        
+        await message.answer(
+            f"✅ Изображение добавлено. Всего изображений: {len(images)}.\n"
+            "Отправьте еще изображения или нажмите «Создать PDF».",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="📄 Создать PDF", callback_data="create_pdf")
+            .button(text="⬅️ Назад", callback_data="back_to_menu")
+            .adjust(1)
+            .as_markup()
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при обработке изображения: {e}")
+        await message.answer(
+            f"❌ Ошибка при обработке изображения: {str(e)}",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="⬅️ Назад", callback_data="back_to_menu")
+            .as_markup()
+        )
 
 
 @router.callback_query(F.data == "create_pdf", PDFStates.waiting_for_images)
@@ -136,35 +161,60 @@ def create_pdf_from_images_list(images_data, output_path):
 async def start_merge_pdf(callback: CallbackQuery, state: FSMContext):
     """Начало процесса объединения PDF-файлов."""
     await callback.answer()
+    
+    # Устанавливаем состояние ожидания PDF-файлов
     await state.set_state(PDFStates.waiting_for_pdfs_to_merge)
     await state.update_data(pdfs=[])
-
-
-@router.message(F.document & F.document.mime_type == "application/pdf", PDFStates.waiting_for_pdfs_to_merge)
-async def process_pdf_for_merge(message: Message, state: FSMContext):
-    """Обработка PDF-файла для объединения."""
-    file = await message.bot.get_file(message.document.file_id)
-    file_content = await message.bot.download_file(file.file_path)
     
-    data = await state.get_data()
-    pdfs = data.get("pdfs", [])
+    await delete_previous_messages(callback.message)
     
-    pdfs.append({
-        "content": file_content.read(),
-        "name": message.document.file_name
-    })
-    
-    await state.update_data(pdfs=pdfs)
-    
-    await message.answer(
-        f"✅ PDF-файл добавлен. Всего файлов: {len(pdfs)}.\n"
-        "Отправьте еще PDF-файлы или нажмите «Объединить PDF».",
+    await callback.message.answer(
+        "📑 <b>Объединение PDF</b>\n\n"
+        "Отправьте мне два или более PDF-файла, которые нужно объединить.\n"
+        "После отправки всех файлов нажмите кнопку «Объединить PDF».",
         reply_markup=InlineKeyboardBuilder()
         .button(text="📑 Объединить PDF", callback_data="merge_pdf_files")
         .button(text="⬅️ Назад", callback_data="back_to_menu")
         .adjust(1)
         .as_markup()
     )
+
+
+@router.message(F.document & F.document.mime_type == "application/pdf", PDFStates.waiting_for_pdfs_to_merge)
+async def process_pdf_for_merge(message: Message, state: FSMContext):
+    """Обработка PDF-файла для объединения."""
+    try:
+        file = await message.bot.get_file(message.document.file_id)
+        file_content = await message.bot.download_file(file.file_path)
+        
+        data = await state.get_data()
+        pdfs = data.get("pdfs", [])
+        
+        pdfs.append({
+            "content": file_content.read(),
+            "name": message.document.file_name
+        })
+        
+        await state.update_data(pdfs=pdfs)
+        
+        await message.answer(
+            f"✅ PDF-файл добавлен. Всего файлов: {len(pdfs)}.\n"
+            "Отправьте еще PDF-файлы или нажмите «Объединить PDF».",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="📑 Объединить PDF", callback_data="merge_pdf_files")
+            .button(text="⬅️ Назад", callback_data="back_to_menu")
+            .adjust(1)
+            .as_markup()
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при обработке PDF: {e}")
+        await message.answer(
+            f"❌ Ошибка при обработке PDF: {str(e)}",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="⬅️ Назад", callback_data="back_to_menu")
+            .as_markup()
+        )
 
 
 @router.callback_query(F.data == "merge_pdf_files", PDFStates.waiting_for_pdfs_to_merge)
@@ -234,7 +284,19 @@ def merge_pdfs(pdf_contents, output_path):
 async def start_compress_pdf(callback: CallbackQuery, state: FSMContext):
     """Начало процесса сжатия PDF-файла."""
     await callback.answer()
+    
+    # Устанавливаем состояние ожидания PDF-файла
     await state.set_state(PDFStates.waiting_for_pdf_to_compress)
+    
+    await delete_previous_messages(callback.message)
+    
+    await callback.message.answer(
+        "🗜 <b>Сжатие PDF</b>\n\n"
+        "Отправьте мне PDF-файл, который нужно сжать.",
+        reply_markup=InlineKeyboardBuilder()
+        .button(text="⬅️ Назад", callback_data="back_to_menu")
+        .as_markup()
+    )
 
 
 @router.message(F.document & F.document.mime_type == "application/pdf", PDFStates.waiting_for_pdf_to_compress)

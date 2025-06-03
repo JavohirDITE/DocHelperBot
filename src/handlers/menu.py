@@ -2,6 +2,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.fsm.context import FSMContext
 
 from handlers.utils import delete_previous_messages
 
@@ -35,71 +36,13 @@ async def cmd_start(message: Message):
     )
 
 
-@router.callback_query(F.data.startswith("menu:"))
-async def process_menu_selection(callback: CallbackQuery):
-    """Обработчик выбора пункта меню."""
-    await callback.answer()
-    
-    action = callback.data.split(":")[1]
-    
-    await delete_previous_messages(callback.message)
-    
-    if action == "background":
-        await callback.message.answer(
-            "🎭 <b>Удаление фона</b>\n\n"
-            "Отправьте мне изображение, с которого нужно удалить фон.",
-            reply_markup=InlineKeyboardBuilder().button(
-                text="⬅️ Назад", callback_data="back_to_menu"
-            ).as_markup()
-        )
-    
-    elif action == "images_to_pdf":
-        await callback.message.answer(
-            "📸 <b>Изображения → PDF</b>\n\n"
-            "Отправьте мне одно или несколько изображений, которые нужно объединить в PDF.\n"
-            "После отправки всех изображений нажмите кнопку «Создать PDF».",
-            reply_markup=InlineKeyboardBuilder()
-            .button(text="📄 Создать PDF", callback_data="create_pdf")
-            .button(text="⬅️ Назад", callback_data="back_to_menu")
-            .adjust(1)
-            .as_markup()
-        )
-    
-    elif action == "merge_pdf":
-        await callback.message.answer(
-            "📑 <b>Объединение PDF</b>\n\n"
-            "Отправьте мне два или более PDF-файла, которые нужно объединить.\n"
-            "После отправки всех файлов нажмите кнопку «Объединить PDF».",
-            reply_markup=InlineKeyboardBuilder()
-            .button(text="📑 Объединить PDF", callback_data="merge_pdf_files")
-            .button(text="⬅️ Назад", callback_data="back_to_menu")
-            .adjust(1)
-            .as_markup()
-        )
-    
-    elif action == "compress_pdf":
-        await callback.message.answer(
-            "🗜 <b>Сжатие PDF</b>\n\n"
-            "Отправьте мне PDF-файл, который нужно сжать.",
-            reply_markup=InlineKeyboardBuilder()
-            .button(text="⬅️ Назад", callback_data="back_to_menu")
-            .as_markup()
-        )
-    
-    elif action == "ocr":
-        await callback.message.answer(
-            "🔍 <b>Распознавание текста (OCR)</b>\n\n"
-            "Отправьте мне изображение с текстом для распознавания.",
-            reply_markup=InlineKeyboardBuilder()
-            .button(text="⬅️ Назад", callback_data="back_to_menu")
-            .as_markup()
-        )
-
-
 @router.callback_query(F.data == "back_to_menu")
-async def back_to_menu(callback: CallbackQuery):
+async def back_to_menu(callback: CallbackQuery, state: FSMContext):
     """Возврат в главное меню."""
     await callback.answer()
+    
+    # Очищаем состояние
+    await state.clear()
     
     await delete_previous_messages(callback.message)
     
