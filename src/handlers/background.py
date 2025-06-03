@@ -30,8 +30,8 @@ async def start_background_removal(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BackgroundRemovalStates.waiting_for_image)
 
 
-@router.message(F.photo & BackgroundRemovalStates.waiting_for_image)
-@router.message(F.document & F.document.mime_type.startswith("image/") & BackgroundRemovalStates.waiting_for_image)
+@router.message(F.photo, BackgroundRemovalStates.waiting_for_image)
+@router.message(F.document & F.document.mime_type.startswith("image/"), BackgroundRemovalStates.waiting_for_image)
 async def process_image_for_background_removal(message: Message, state: FSMContext):
     """Обработка изображения для удаления фона."""
     processing_msg = await message.answer("🔄 Обрабатываю изображение...")
@@ -62,7 +62,7 @@ async def process_image_for_background_removal(message: Message, state: FSMConte
     await state.set_state(BackgroundRemovalStates.waiting_for_background_choice)
 
 
-@router.callback_query(F.data.startswith("bg:") & BackgroundRemovalStates.waiting_for_background_choice)
+@router.callback_query(F.data.startswith("bg:"), BackgroundRemovalStates.waiting_for_background_choice)
 async def process_background_choice(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора фона."""
     await callback.answer()

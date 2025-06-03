@@ -31,8 +31,8 @@ async def start_images_to_pdf(callback: CallbackQuery, state: FSMContext):
     await state.update_data(images=[])
 
 
-@router.message(F.photo & PDFStates.waiting_for_images)
-@router.message(F.document & F.document.mime_type.startswith("image/") & PDFStates.waiting_for_images)
+@router.message(F.photo, PDFStates.waiting_for_images)
+@router.message(F.document & F.document.mime_type.startswith("image/"), PDFStates.waiting_for_images)
 async def process_image_for_pdf(message: Message, state: FSMContext):
     """Обработка изображения для конвертации в PDF."""
     if message.photo:
@@ -60,7 +60,7 @@ async def process_image_for_pdf(message: Message, state: FSMContext):
     )
 
 
-@router.callback_query(F.data == "create_pdf" & PDFStates.waiting_for_images)
+@router.callback_query(F.data == "create_pdf", PDFStates.waiting_for_images)
 async def create_pdf_from_images(callback: CallbackQuery, state: FSMContext):
     """Создание PDF из изображений."""
     await callback.answer()
@@ -140,7 +140,7 @@ async def start_merge_pdf(callback: CallbackQuery, state: FSMContext):
     await state.update_data(pdfs=[])
 
 
-@router.message(F.document & F.document.mime_type == "application/pdf" & PDFStates.waiting_for_pdfs_to_merge)
+@router.message(F.document & F.document.mime_type == "application/pdf", PDFStates.waiting_for_pdfs_to_merge)
 async def process_pdf_for_merge(message: Message, state: FSMContext):
     """Обработка PDF-файла для объединения."""
     file = await message.bot.get_file(message.document.file_id)
@@ -167,7 +167,7 @@ async def process_pdf_for_merge(message: Message, state: FSMContext):
     )
 
 
-@router.callback_query(F.data == "merge_pdf_files" & PDFStates.waiting_for_pdfs_to_merge)
+@router.callback_query(F.data == "merge_pdf_files", PDFStates.waiting_for_pdfs_to_merge)
 async def merge_pdf_files(callback: CallbackQuery, state: FSMContext):
     """Объединение PDF-файлов."""
     await callback.answer()
@@ -237,7 +237,7 @@ async def start_compress_pdf(callback: CallbackQuery, state: FSMContext):
     await state.set_state(PDFStates.waiting_for_pdf_to_compress)
 
 
-@router.message(F.document & F.document.mime_type == "application/pdf" & PDFStates.waiting_for_pdf_to_compress)
+@router.message(F.document & F.document.mime_type == "application/pdf", PDFStates.waiting_for_pdf_to_compress)
 async def process_pdf_for_compression(message: Message, state: FSMContext):
     """Обработка PDF-файла для сжатия."""
     processing_msg = await message.answer("🔄 Сжимаю PDF-файл...")
