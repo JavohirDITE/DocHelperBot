@@ -1,0 +1,6 @@
+aiogram==3.4.1
+pillow==10.2.0
+rembg==2.0.50
+pymupdf==1.23.26
+pytesseract==0.3.10
+python-dotenv==1.0.1
