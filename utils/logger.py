@@ -21,15 +21,19 @@ def setup_logger(name: str) -> logging.Logger:
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
     
-    # Файловый обработчик
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
-    
-    file_handler = logging.FileHandler(
-        log_dir / "bot.log",
-        encoding='utf-8'
-    )
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
+    # Файловый обработчик (только если директория существует)
+    try:
+        log_dir = Path("logs")
+        log_dir.mkdir(exist_ok=True)
+        
+        file_handler = logging.FileHandler(
+            log_dir / "bot.log",
+            encoding='utf-8'
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    except:
+        # Если не можем создать файл логов, продолжаем без него
+        pass
     
     return logger
