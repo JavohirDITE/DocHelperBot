@@ -45,10 +45,15 @@ class VKClient:
     async def search_audio(self, query: str, page: int = 0) -> List[Dict]:
         """Поиск аудио в VK"""
         try:
-            results = self.vk_audio.search(
-                query, 
-                count=self.config.RESULTS_PER_PAGE,
-                offset=page * self.config.RESULTS_PER_PAGE
+            # VK API работает синхронно, поэтому выполняем в executor
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                lambda: self.vk_audio.search(
+                    query, 
+                    count=self.config.RESULTS_PER_PAGE,
+                    offset=page * self.config.RESULTS_PER_PAGE
+                )
             )
             
             processed_results = []
@@ -73,7 +78,12 @@ class VKClient:
         """Получение трека по ID"""
         try:
             owner_id, audio_id = track_id.split('_')
-            track = self.vk_audio.get_audio_by_id(int(owner_id), int(audio_id))
+            
+            loop = asyncio.get_event_loop()
+            track = await loop.run_in_executor(
+                None,
+                lambda: self.vk_audio.get_audio_by_id(int(owner_id), int(audio_id))
+            )
             
             if track:
                 return {
