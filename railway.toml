@@ -1,0 +1,27 @@
+[build]
+builder = "dockerfile"
+
+[deploy]
+healthcheckPath = "/"
+healthcheckTimeout = 300
+restartPolicyType = "always"
+
+[[deploy.environmentVariables]]
+name = "BOT_TOKEN"
+description = "Telegram Bot Token from @BotFather"
+
+[[deploy.environmentVariables]]
+name = "VK_LOGIN"
+description = "VK.com login (email or phone)"
+
+[[deploy.environmentVariables]]
+name = "VK_PASSWORD"
+description = "VK.com password"
+
+[[deploy.environmentVariables]]
+name = "LOG_LEVEL"
+value = "INFO"
+
+[[deploy.environmentVariables]]
+name = "RESULTS_PER_PAGE"
+value = "6"
