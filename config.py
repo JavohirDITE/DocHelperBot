@@ -13,9 +13,6 @@ class Config:
     VK_LOGIN: str
     VK_PASSWORD: str
     
-    # Database
-    DATABASE_URL: Optional[str] = None
-    
     # Logging
     LOG_LEVEL: str = "INFO"
     
@@ -27,7 +24,6 @@ class Config:
         self.BOT_TOKEN = self._get_env("BOT_TOKEN")
         self.VK_LOGIN = self._get_env("VK_LOGIN")
         self.VK_PASSWORD = self._get_env("VK_PASSWORD")
-        self.DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot.db")
         self.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
         self.RESULTS_PER_PAGE = int(os.getenv("RESULTS_PER_PAGE", "6"))
         self.MAX_DOWNLOAD_SIZE = int(os.getenv("MAX_DOWNLOAD_SIZE", str(50 * 1024 * 1024)))
