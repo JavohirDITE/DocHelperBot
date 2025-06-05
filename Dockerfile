@@ -17,8 +17,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Копируем код приложения
 COPY . .
 
-# Создаем директории для логов и базы данных
-RUN mkdir -p logs data
+# Создаем директории для логов
+RUN mkdir -p logs
 
 # Устанавливаем переменную окружения для Python
 ENV PYTHONPATH=/app
