@@ -1,73 +1,340 @@
 #!/usr/bin/env python
 import asyncio
-import json
 import logging
 import os
 import sys
-import requests
-import socket
-import traceback
 from pathlib import Path
-
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputMediaAudio, InputFile, File
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext, MessageHandler, Filters
-from telegram.ext.filters import Filters
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.utils import executor
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.types import BotCommand, BotCommandScope
-from aiogram.utils import executor
+from aiogram.dispatcher.filters import Command, Text
 
-from vk_funcs import ep_vk_search, ep_vk_audio_by_ids, ep_vk_finish, download_audio, download_cover, renew_connection
-from shazam_funcs import shazam_recognize
-
-from auths import AUTHS
-from handlers import register_handlers
 from config import Config
-from database import Database
 from vk_client import VKClient
+from shazam_client import ShazamClient
 from utils.logger import setup_logger
-
-socket._GLOBAL_DEFAULT_TIMEOUT = 100
-
-n_results_per_page = 6
-
-updater = None
-
-SAVED = {}
 
 # Настройка логирования
 logger = setup_logger(__name__)
 
+# Состояния бота
 class BotStates(StatesGroup):
     waiting_for_search = State()
     waiting_for_album_name = State()
 
-def log(*args):
-    logger.info(*args)
+# Глобальные переменные
+vk_client = None
+shazam_client = None
 
-def info(*args):
-    logger.info(*args)
+async def cmd_start(message: types.Message):
+    """Обработчик команды /start"""
+    user_name = message.from_user.first_name
+    
+    welcome_text = f"""
+🎵 <b>Добро пожаловать, {user_name}!</b>
 
-def debug(*args):
-    logger.debug(*args)
+Я помогу вам найти и скачать музыку из ВКонтакте.
 
-def warning(*args):
-    logger.warning(*args)
+<b>Что я умею:</b>
+🔍 Искать музыку по названию
+🎤 Распознавать музыку из голосовых сообщений
+⬇️ Скачивать музыку в высоком качестве
+
+<b>Как пользоваться:</b>
+• Отправьте название песни или исполнителя
+• Запишите голосовое сообщение с музыкой
+• Используйте команды из меню
+
+Начните с поиска музыки! 🎶
+    """
+    
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(
+        types.KeyboardButton("🔍 Поиск музыки"),
+        types.KeyboardButton("❓ Помощь")
+    )
+    
+    await message.answer(welcome_text, reply_markup=keyboard)
+    logger.info(f"Пользователь {message.from_user.id} запустил бота")
+
+async def cmd_help(message: types.Message):
+    """Обработчик команды /help"""
+    help_text = """
+<b>📖 Справка по командам:</b>
+
+/start - Запустить бота
+/search - Поиск музыки
+/help - Показать эту справку
+
+<b>🎵 Поиск музыки:</b>
+• Просто отправьте название песни
+• Используйте формат "Исполнитель - Название"
+• Отправьте голосовое сообщение для распознавания
+
+<b>🔧 Дополнительно:</b>
+• Бот поддерживает высокое качество аудио
+• Автоматическое распознавание через Shazam
+• Быстрая загрузка и отправка файлов
+
+Если возникли проблемы, попробуйте команду /start
+    """
+    
+    await message.answer(help_text)
+
+async def cmd_search(message: types.Message):
+    """Обработчик команды /search"""
+    await message.answer(
+        "🔍 <b>Поиск музыки</b>\n\n"
+        "Отправьте название песни или исполнителя:",
+        reply_markup=types.ReplyKeyboardMarkup(
+            keyboard=[[types.KeyboardButton("❌ Отмена")]],
+            resize_keyboard=True
+        )
+    )
+    await BotStates.waiting_for_search.set()
+
+async def process_search_query(message: types.Message, state: FSMContext):
+    """Обработка поискового запроса"""
+    if message.text == "❌ Отмена":
+        await state.finish()
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        keyboard.add(
+            types.KeyboardButton("🔍 Поиск музыки"),
+            types.KeyboardButton("❓ Помощь")
+        )
+        await message.answer("Поиск отменен", reply_markup=keyboard)
+        return
+    
+    query = message.text.strip()
+    if not query:
+        await message.answer("Пожалуйста, введите корректный запрос")
+        return
+    
+    await handle_search(message, query)
+    await state.finish()
+
+async def handle_search(message: types.Message, query: str):
+    """Обработка поиска музыки"""
+    # Показываем индикатор загрузки
+    search_msg = await message.answer("🔍 Ищу музыку...")
+    
+    try:
+        global vk_client
+        if not vk_client:
+            await search_msg.edit_text("❌ VK клиент не инициализирован")
+            return
+            
+        results = await vk_client.search_audio(query, page=0)
+        
+        if not results:
+            await search_msg.edit_text(
+                "😔 Ничего не найдено.\n"
+                "Попробуйте изменить запрос или проверить правописание."
+            )
+            return
+        
+        # Создаем клавиатуру с результатами
+        keyboard = types.InlineKeyboardMarkup(row_width=1)
+        
+        for i, track in enumerate(results[:6]):  # Показываем первые 6 результатов
+            track_text = f"🎵 {track['artist']} - {track['title']}"
+            if len(track_text) > 60:
+                track_text = track_text[:57] + "..."
+            
+            keyboard.add(
+                types.InlineKeyboardButton(
+                    track_text,
+                    callback_data=f"download:{track['id']}"
+                )
+            )
+        
+        await search_msg.edit_text(
+            f"🎵 <b>Результаты поиска:</b> {query}\n"
+            f"Найдено: {len(results)} треков"
+        )
+        
+        await message.answer(
+            "Выберите трек для скачивания:",
+            reply_markup=keyboard
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка поиска: {e}")
+        await search_msg.edit_text(
+            "❌ Произошла ошибка при поиске.\n"
+            "Попробуйте позже."
+        )
+
+async def handle_text_search(message: types.Message):
+    """Обработка текстового поиска без команды"""
+    # Проверяем, что это не команда и не кнопка
+    if message.text.startswith('/') or message.text in ["🔍 Поиск музыки", "❓ Помощь", "❌ Отмена"]:
+        return
+    
+    query = message.text.strip()
+    await handle_search(message, query)
+
+async def handle_voice_message(message: types.Message):
+    """Обработка голосовых сообщений для распознавания музыки"""
+    processing_msg = await message.answer("🎤 Распознаю музыку...")
+    
+    try:
+        # Скачиваем голосовое сообщение
+        file_info = await message.bot.get_file(message.voice.file_id)
+        file_data = await message.bot.download_file(file_info.file_path)
+        
+        # Распознаем через Shazam
+        await processing_msg.edit_text("🔍 Анализирую аудио...")
+        
+        global shazam_client
+        if not shazam_client:
+            await processing_msg.edit_text("❌ Shazam клиент не инициализирован")
+            return
+            
+        recognition_result = await shazam_client.recognize(file_data.read())
+        
+        if not recognition_result or not recognition_result.get('matches'):
+            await processing_msg.edit_text(
+                "😔 Не удалось распознать музыку.\n"
+                "Попробуйте записать более четкое голосовое сообщение."
+            )
+            return
+        
+        # Получаем информацию о треке
+        track_info = recognition_result.get('track', {})
+        title = track_info.get('title', '')
+        artist = track_info.get('subtitle', '')
+        
+        if not title or not artist:
+            await processing_msg.edit_text(
+                "😔 Не удалось получить информацию о треке."
+            )
+            return
+        
+        # Формируем поисковый запрос
+        query = f"{artist} - {title}"
+        
+        await processing_msg.edit_text(
+            f"✅ Распознано: <b>{query}</b>\n"
+            "🔍 Ищу в ВКонтакте..."
+        )
+        
+        # Ищем в VK
+        global vk_client
+        results = await vk_client.search_audio(query, page=0)
+        
+        if not results:
+            await processing_msg.edit_text(
+                f"✅ Распознано: <b>{query}</b>\n"
+                "😔 К сожалению, не найдено в ВКонтакте."
+            )
+            return
+        
+        # Показываем результаты
+        keyboard = types.InlineKeyboardMarkup(row_width=1)
+        
+        for track in results[:3]:  # Показываем первые 3 результата
+            track_text = f"🎵 {track['artist']} - {track['title']}"
+            if len(track_text) > 60:
+                track_text = track_text[:57] + "..."
+            
+            keyboard.add(
+                types.InlineKeyboardButton(
+                    track_text,
+                    callback_data=f"download:{track['id']}"
+                )
+            )
+        
+        await processing_msg.edit_text(
+            f"✅ Распознано: <b>{query}</b>\n"
+            f"🎵 Найдено: {len(results)} треков"
+        )
+        
+        await message.answer(
+            "Выберите нужный трек:",
+            reply_markup=keyboard
+        )
+        
+        logger.info(f"Пользователь {message.from_user.id} распознал: {query}")
+        
+    except Exception as e:
+        logger.error(f"Ошибка распознавания: {e}")
+        await processing_msg.edit_text(
+            "❌ Произошла ошибка при распознавании.\n"
+            "Попробуйте позже."
+        )
+
+async def handle_download_track(callback_query: types.CallbackQuery):
+    """Обработка скачивания трека"""
+    await callback_query.answer()
+    
+    # Извлекаем ID трека из callback_data
+    track_id = callback_query.data.split(':')[1]
+    
+    # Показываем индикатор загрузки
+    loading_msg = await callback_query.message.answer("⬇️ Скачиваю трек...")
+    
+    try:
+        global vk_client
+        track_info = await vk_client.get_track_by_id(track_id)
+        
+        if not track_info:
+            await loading_msg.edit_text("❌ Трек не найден")
+            return
+        
+        # Скачиваем аудио
+        await loading_msg.edit_text("📥 Загружаю аудио файл...")
+        audio_data = await vk_client.download_audio(track_info['url'])
+        
+        # Скачиваем обложку (если есть)
+        thumb_data = None
+        if track_info.get('thumb_url'):
+            try:
+                thumb_data = await vk_client.download_cover(track_info['thumb_url'])
+            except:
+                pass
+        
+        # Отправляем аудио
+        await loading_msg.edit_text("📤 Отправляю...")
+        
+        await callback_query.message.answer_audio(
+            audio_data,
+            duration=track_info.get('duration', 0),
+            performer=track_info['artist'],
+            title=track_info['title'],
+            thumb=thumb_data.getvalue() if thumb_data else None
+        )
+        
+        await loading_msg.delete()
+        
+        logger.info(f"Пользователь {callback_query.from_user.id} скачал трек {track_id}")
+        
+    except Exception as e:
+        logger.error(f"Ошибка скачивания трека: {e}")
+        await loading_msg.edit_text(
+            "❌ Произошла ошибка при скачивании.\n"
+            "Попробуйте позже."
+        )
+
+async def handle_button_press(message: types.Message):
+    """Обработка нажатий кнопок"""
+    if message.text == "🔍 Поиск музыки":
+        await cmd_search(message)
+    elif message.text == "❓ Помощь":
+        await cmd_help(message)
 
 async def set_bot_commands(bot: Bot):
     """Устанавливает меню команд бота"""
     commands = [
-        BotCommand(command="start", description="🎵 Запустить бота"),
-        BotCommand(command="search", description="🔍 Поиск музыки"),
-        BotCommand(command="albums", description="📁 Мои альбомы"),
-        BotCommand(command="help", description="❓ Помощь"),
-        BotCommand(command="settings", description="⚙️ Настройки"),
+        types.BotCommand(command="start", description="🎵 Запустить бота"),
+        types.BotCommand(command="search", description="🔍 Поиск музыки"),
+        types.BotCommand(command="help", description="❓ Помощь"),
     ]
     
-    await bot.set_my_commands(commands, BotCommandScope(type="default"))
+    await bot.set_my_commands(commands)
     logger.info("Команды бота установлены")
 
 async def on_startup(dp: Dispatcher):
@@ -77,13 +344,21 @@ async def on_startup(dp: Dispatcher):
     # Устанавливаем команды
     await set_bot_commands(dp.bot)
     
-    # Инициализируем базу данных
-    db = Database()
-    await db.init_db()
-    
     # Инициализируем VK клиент
-    vk_client = VKClient()
-    await vk_client.init()
+    global vk_client, shazam_client
+    try:
+        vk_client = VKClient()
+        await vk_client.init()
+        logger.info("VK клиент инициализирован")
+    except Exception as e:
+        logger.error(f"Ошибка инициализации VK клиента: {e}")
+    
+    # Инициализируем Shazam клиент
+    try:
+        shazam_client = ShazamClient()
+        logger.info("Shazam клиент инициализирован")
+    except Exception as e:
+        logger.error(f"Ошибка инициализации Shazam клиента: {e}")
     
     logger.info("Бот успешно запущен!")
 
@@ -92,238 +367,79 @@ async def on_shutdown(dp: Dispatcher):
     logger.info("Бот останавливается...")
     
     # Закрываем соединения
+    global vk_client
+    if vk_client:
+        await vk_client.close()
+    
     await dp.storage.close()
     await dp.storage.wait_closed()
     
     logger.info("Бот остановлен")
 
-def start(update: Update, context: CallbackContext) -> None:
-    update.message.reply_text('Здравствуй! Ищу и качаю музыку с вконтакте, пиши что надо найти')
-
-def renew(update: Update, context: CallbackContext) -> None:
-    try:
-        renew_connection()
-        update.message.reply_text('VK connection renewed')
-    except:
-        traceback.print_exc()
-        try:
-            update.message.reply_text('Error..')
-        except:
-            pass
-
-MAX_MESSAGE_LEN = 500
-def send_exc(message, s, print_also=True):
-    if print_also:
-        print(s)
-
-    try:
-        message.reply_text(s[:MAX_MESSAGE_LEN])
-        if len(s) > MAX_MESSAGE_LEN:
-            send_exc(message, s[MAX_MESSAGE_LEN:], print_also=False)
-    except:
-        traceback.print_exc()
-
-def msg_add_text(msg, s):
-    log(s)
-    msg.text = msg.text + s
-    msg.edit_text(msg.text)
-
-def button(update: Update, context: CallbackContext) -> None:
-    global DEBUG
-    DEBUG['context'] = context
-    DEBUG['update'] = update
-
-    query = update.callback_query
-
-    # CallbackQueries need to be answered, even if no notification to the user is needed
-    # Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
-    query.answer()
+def register_handlers(dp: Dispatcher):
+    """Регистрирует все обработчики"""
+    # Команды
+    dp.register_message_handler(cmd_start, Command("start"))
+    dp.register_message_handler(cmd_help, Command("help"))
+    dp.register_message_handler(cmd_search, Command("search"))
     
-    msg = query.message.reply_text("думаю..")
+    # Состояния
+    dp.register_message_handler(
+        process_search_query, 
+        state=BotStates.waiting_for_search
+    )
     
-    log_fun = lambda s: msg_add_text(msg, s)
+    # Callback запросы
+    dp.register_callback_query_handler(
+        handle_download_track,
+        Text(startswith="download:")
+    )
     
-    ids = query.data
+    # Голосовые сообщения
+    dp.register_message_handler(
+        handle_voice_message,
+        content_types=types.ContentType.VOICE
+    )
     
-    if ids[0] == '{':
-        # page stuff!
-        
-        ts = ids[1:].split('|')
-        
-        r = {'q': ts[0], 'page': int(ts[1])}
-        
-        info('looking at page %i for %s'
-             % (r['page'], r['q']))
-        
-        log_fun('ищу..')
-
-        page_search(r['q'], query.message, page=int(r['page']), edit=True)
-        
-        msg.delete()
-    else:
-        global SAVED
-        
-        if ids not in SAVED:
-            info('%s not in SAVED! getting from vk..' % ids)
-            msg_add_text(msg, 'смотрю данные..')
-            r = ep_vk_audio_by_ids(ids)
-            SAVED[ids] = r
-        
-        r = SAVED[ids]
-        
-        DEBUG['msg'] = msg
-        
-        info('Getting %s : %s' % (ids, r['title_str']))
-        
-        print(r)
+    # Кнопки
+    dp.register_message_handler(
+        handle_button_press,
+        Text(equals=["🔍 Поиск музыки", "❓ Помощь"])
+    )
     
-        try:
-            content = download_audio(r['url'], log_fun)
-        
-            thumb = None
-            if r['track_covers']:
-                thumb = download_cover(r['track_covers'], log_fun)
-            else:
-                thumb = None
-            
-            log_fun('отправляю..')
-
-            msg2 = query.message.reply_audio(
-                content,
-                duration=r['duration'],
-                title=r['title'],
-                performer=r['artist'],
-                thumb=thumb,
-            )
-            
-            DEBUG['reply_audio'] = msg2
-            
-            info('Got %s : %s' % (ids, r['title_str']))
-
-            msg.delete()
-        except Exception as e:
-            log_fun('ошибка')
-            warning(str(r))
-            warning(traceback.format_exc())
-            # send_exc(query.message, traceback.format_exc())
-
-            try:
-                query.message.reply_audio(
-                    r['url'],
-                    title=r['title'],
-                    performer=r['artist'],
-                )
-            except:
-                traceback.print_exc()
-
-def help_command(update: Update, context: CallbackContext) -> None:
-    update.message.reply_text("Use /start to test this bot.")
-
-def page_button(q, page, delta_n):
-    return InlineKeyboardButton(
-        "<" if delta_n < 0 else ">", 
-        callback_data='{'+q+'|'+str(page + delta_n) # json.dumps({'q':q,'page':page+1})
+    # Текстовые сообщения (поиск)
+    dp.register_message_handler(
+        handle_text_search,
+        content_types=types.ContentType.TEXT
     )
 
-def prepare_keyboard(q, R, page):
-    global SAVED
-    
-    keyboard = [
-        [InlineKeyboardButton(
-            r['title_str'],
-            callback_data=r['ids_string']
-        )]
-        for j, r in enumerate(R)
-    ]
-    
-    prev_page_btn = page_button(q, page, -1)
-    next_page_btn = page_button(q, page, 1)
-    
-    page_btns = []
-    if page > 0:
-        page_btns.append(prev_page_btn)
-    if len(R) >= n_results_per_page:
-        page_btns.append(next_page_btn)
-    
-    if len(page_btns) > 0:
-        keyboard.append(page_btns)
-    
-    return keyboard
-
-def audio_or_voice(update: Update, context: CallbackContext) -> None:
-    
-    print(update.message)
-
-    DEBUG['msgs'].append(update.message)    
-    
-    file_data = update.message.audio or update.message.voice
-    file = update.message.bot.get_file(file_data.file_id)
-    
-    content = file.download_as_bytearray()
-    print('recognizing file..')
-    rec = shazam_recognize(content)
-    
-    print(rec)
-    DEBUG['rec'] = rec
-    
-    if len(rec['matches']) == 0:
-        update.message.reply_text('Nothing found, sorry..')     
-   
-    else:
-        page_search(
-            rec['track']['title']+' - '+rec['track']['subtitle'],
-            update.message
-        )
-
-def message(update: Update, context: CallbackContext) -> None:
-    page_search(update.message.text, update.message)
-
-def page_search(s, message, page=0, edit=False):
-    info('Looking for ' + s)
-    
-    R = ep_vk_search(s, n_results_per_page=n_results_per_page, page=page)
-    info('Found : %i results' % len(R))
-    
-    if len(R) == 0:
-        info('nothing..')
-        message.reply_text('Ничего не нашлось..')
-    else:
-        global SAVED
-        for r in R:
-            SAVED[r['callback_data']] = {k: r[k] for k in r}
-       
-        keyboard = prepare_keyboard(s, R, page)
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        if edit:
-            message.edit_reply_markup(reply_markup)
-        else:
-            message.reply_text('Вот что нашёл:', reply_markup=reply_markup)
-
 def main():
-    global updater
-    # Create the Updater and pass it your bot's token.
-    updater = Updater(AUTHS[2])
-
-    updater.dispatcher.add_handler(CommandHandler('start', start))
-    updater.dispatcher.add_handler(CommandHandler('renew', renew))
-    updater.dispatcher.add_handler(MessageHandler(Filters.text, message))
-    updater.dispatcher.add_handler(MessageHandler(Filters.audio | Filters.voice, audio_or_voice))
-    updater.dispatcher.add_handler(CallbackQueryHandler(button))
-    updater.dispatcher.add_handler(CommandHandler('help', help_command))
-
-    me = updater.bot.getMe()
-    
-    print(f'I am:\nname:{me.first_name} username:{me.username} id:{me.id}\nSecurity token:\n{AUTHS[2]}')
-    
-    # Start the Bot
-    updater.start_polling()
-
-    # Run the bot until the user presses Ctrl-C or the process receives SIGINT,
-    # SIGTERM or SIGABRT
-    updater.idle()
-    
-    ep_vk_finish()
+    """Главная функция запуска бота"""
+    try:
+        # Загружаем конфигурацию
+        config = Config()
+        logger.info("Конфигурация загружена")
+        
+        # Создаем бота и диспетчер
+        bot = Bot(token=config.BOT_TOKEN, parse_mode=types.ParseMode.HTML)
+        storage = MemoryStorage()
+        dp = Dispatcher(bot, storage=storage)
+        
+        # Регистрируем обработчики
+        register_handlers(dp)
+        logger.info("Обработчики зарегистрированы")
+        
+        # Запускаем бота
+        executor.start_polling(
+            dp,
+            skip_updates=True,
+            on_startup=on_startup,
+            on_shutdown=on_shutdown
+        )
+        
+    except Exception as e:
+        logger.error(f"Критическая ошибка: {e}")
+        sys.exit(1)
 
 if __name__ == '__main__':
-    print('This is ep_vk_music__bot')
     main()
